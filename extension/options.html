@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Multi-Input Sync — Options</title>
+    <style>
+      body{font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;margin:24px;max-width:680px}
+      label{display:block;margin:12px 0 4px}
+      input{width:100%;padding:8px 10px}
+      button{margin-top:16px;padding:8px 12px}
+      .row{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end}
+      small{color:#666}
+    </style>
+  </head>
+  <body>
+    <h1>Multi-Input Sync — Options</h1>
+    <label>Profile name</label>
+    <input id="profile" placeholder="prof_1">
+    <label>WS URL</label>
+    <input id="wsURL" placeholder="ws://127.0.0.1:8765">
+    <div class="row">
+      <small>Роль мастера задаётся в вашем десктоп-GUI. Здесь только имя профиля и адрес WS.</small>
+      <button id="save">Save</button>
+    </div>
+    <script src="options.js"></script>
+  </body>
+</html>
