@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 import subprocess
 import shutil
@@ -8,6 +8,7 @@ import psutil
 import time
 from typing import Optional, List, Dict, Set
 from .config import PROFILES_ROOT, CANDIDATE_CHROME_PATHS, CHROME_ARGS_BASE, EXTENSION_PATH
+from .profile_settings import ProfileSettings
 
 __all__ = ["ProfileInfo", "ProfileManager"]
 
@@ -22,6 +23,7 @@ class ProfileInfo:
     name: str
     path: Path
     pid: Optional[int] = None
+    settings: ProfileSettings = field(default_factory=ProfileSettings)
 
 class ProfileManager:
     """
@@ -43,7 +45,8 @@ class ProfileManager:
         self._profiles.clear()
         for p in sorted(PROFILES_ROOT.glob("*")):
             if p.is_dir():
-                self._profiles.append(ProfileInfo(name=p.name, path=p))
+                settings = ProfileSettings.load(p)
+                self._profiles.append(ProfileInfo(name=p.name, path=p, settings=settings))
         return list(self._profiles)
 
     def list(self) -> List[ProfileInfo]:
@@ -58,7 +61,9 @@ class ProfileManager:
     def create(self, name: str) -> ProfileInfo:
         path = PROFILES_ROOT / name
         path.mkdir(parents=True, exist_ok=False)
-        info = ProfileInfo(name=name, path=path)
+        settings = ProfileSettings()
+        settings.save(path)
+        info = ProfileInfo(name=name, path=path, settings=settings)
         self._profiles.append(info)
         return info
 
@@ -126,11 +131,23 @@ class ProfileManager:
         ]
         if EXTENSION_PATH and EXTENSION_PATH.exists():
             args.append(f"--load-extension={str(EXTENSION_PATH)}")
+        proxy = info.settings.proxy_server
+        if proxy:
+            args.append(f"--proxy-server={proxy}")
         if extra_args:
             args.extend(extra_args)
+        start_url = info.settings.start_url.strip()
+        if start_url:
+            args.append(start_url)
         proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         info.pid = proc.pid
         return info.pid
+
+    def update_settings(self, name: str, settings: ProfileSettings) -> ProfileSettings:
+        info = self.get(name)
+        info.settings = settings
+        settings.save(info.path)
+        return settings
 
     def stop_fast(self, name: str, soft_ms: int = 600, term_ms: int = 900) -> None:
         info = self.get(name)
