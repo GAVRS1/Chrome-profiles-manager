@@ -2,14 +2,15 @@ from __future__ import annotations
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QListWidget, QListWidgetItem, QMessageBox, QLineEdit, QLabel,
-    QCheckBox, QGroupBox, QAbstractItemView
+    QCheckBox, QGroupBox, QAbstractItemView, QTabWidget, QFormLayout
 )
-from PySide6.QtCore import QTimer, QThread, Signal, QObject
+from PySide6.QtCore import QTimer, QThread, Signal, QObject, Qt
+from PySide6.QtGui import QIntValidator
 from .profile_manager import ProfileManager, ProfileInfo
+from .profile_settings import ProfileSettings
 from .chrome_window_manager import ChromeWindowManager, WindowInfo
 from .sync_manager import SyncManager
 from .ws_hub import WSHub
-import threading
 from typing import List
 
 # ───────── воркеры ─────────
@@ -52,43 +53,77 @@ class MainWindow(QMainWindow):
         self.wm = ChromeWindowManager()
         self._master_profile: str | None = None
         self._sync_enabled = False
+        self._hub_running = False
+        self._updating_client_list = False
 
         self.sync = SyncManager(self._get_target_windows)
         self.sync.set_master_provider(self._master_hwnd)
 
         self.hub = WSHub()
-        # стартуем хаб в отдельном потоке
-        self._hub_thread = threading.Thread(target=self.hub.start_sync, daemon=True)
-        self._hub_thread.start()
 
         # UI
         central = QWidget()
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
 
-        layout.addWidget(QLabel("Профили"))
+        self.tabs = QTabWidget()
+        layout.addWidget(self.tabs)
 
+        # ---- вкладка профилей ----
+        tab_profiles = QWidget()
+        tab_profiles_layout = QVBoxLayout(tab_profiles)
+
+        tab_profiles_layout.addWidget(QLabel("Профили"))
         self.list_profiles = QListWidget()
-        # мультивыбор профилей
         self.list_profiles.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        layout.addWidget(self.list_profiles)
+        tab_profiles_layout.addWidget(self.list_profiles)
 
-        # ряд управления профилями (пакетные действия)
         row1 = QHBoxLayout()
         self.btn_refresh = QPushButton("Обновить")
         self.btn_launch_sel = QPushButton("Запустить выбранные")
         self.btn_stop_sel = QPushButton("Остановить выбранные")
         self.btn_create = QPushButton("Создать")
         self.input_name = QLineEdit(); self.input_name.setPlaceholderText("Имя профиля")
-
         row1.addWidget(self.btn_refresh)
         row1.addWidget(self.btn_launch_sel)
         row1.addWidget(self.btn_stop_sel)
         row1.addWidget(self.input_name)
         row1.addWidget(self.btn_create)
-        layout.addLayout(row1)
+        tab_profiles_layout.addLayout(row1)
 
-        # блок синхронизации ввода
+        settings_group = QGroupBox("Настройки профиля")
+        settings_form = QFormLayout(settings_group)
+        self.input_start_url = QLineEdit()
+        self.input_start_url.setPlaceholderText("https://example.com")
+        self.chk_proxy_enabled = QCheckBox("Использовать прокси")
+        self.input_proxy_host = QLineEdit()
+        self.input_proxy_host.setPlaceholderText("host")
+        self.input_proxy_port = QLineEdit()
+        self.input_proxy_port.setPlaceholderText("порт")
+        self.input_proxy_port.setValidator(QIntValidator(1, 65535, self))
+        self.btn_save_settings = QPushButton("Сохранить настройки")
+
+        settings_form.addRow(QLabel("Начальная страница:"), self.input_start_url)
+        settings_form.addRow(self.chk_proxy_enabled)
+        proxy_row = QHBoxLayout()
+        proxy_row.addWidget(self.input_proxy_host)
+        proxy_row.addWidget(self.input_proxy_port)
+        settings_form.addRow(QLabel("Прокси:"), proxy_row)
+        settings_form.addRow(self.btn_save_settings)
+
+        tab_profiles_layout.addWidget(settings_group)
+
+        self.tabs.addTab(tab_profiles, "Профили")
+
+        # ---- вкладка синхронизации ----
+        tab_sync = QWidget()
+        tab_sync_layout = QVBoxLayout(tab_sync)
+
+        self.chk_server_enabled = QCheckBox("Включить синхронизатор (WS сервер)")
+        self.lbl_server_status = QLabel("Сервер выключен")
+        tab_sync_layout.addWidget(self.chk_server_enabled)
+        tab_sync_layout.addWidget(self.lbl_server_status)
+
         gb = QGroupBox("Синхронизация ввода (нативная, WinAPI)")
         gbl = QHBoxLayout(gb)
         self.btn_set_master_profile = QPushButton("Назначить Мастером (профиль)")
@@ -99,23 +134,25 @@ class MainWindow(QMainWindow):
         gbl.addWidget(self.chk_keyboard)
         gbl.addWidget(self.chk_mouse)
         gbl.addWidget(self.btn_toggle_sync)
-        layout.addWidget(gb)
+        tab_sync_layout.addWidget(gb)
 
-        # список WS-клиентов
-        layout.addWidget(QLabel("WS-клиенты (расширение)"))
+        tab_sync_layout.addWidget(QLabel("WS-клиенты (расширение)"))
         self.list_clients = QListWidget()
-        # мультивыбор клиентов (на случай будущих массовых действий)
         self.list_clients.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        layout.addWidget(self.list_clients)
+        tab_sync_layout.addWidget(self.list_clients)
 
         row2 = QHBoxLayout()
         self.btn_refresh_clients = QPushButton("Обновить клиентов")
         self.btn_set_master_client = QPushButton("Назначить Мастером (клиент)")
         row2.addWidget(self.btn_refresh_clients)
         row2.addWidget(self.btn_set_master_client)
-        layout.addLayout(row2)
+        tab_sync_layout.addLayout(row2)
+
+        self.tabs.addTab(tab_sync, "Синхронизация")
 
         # сигналы
+        self.tabs.currentChanged.connect(self._on_tab_changed)
+        self.list_profiles.currentItemChanged.connect(self._on_profile_selection_changed)
         self.btn_refresh.clicked.connect(self._refresh_filesystem)
         self.btn_create.clicked.connect(self._create_profile)
         self.btn_launch_sel.clicked.connect(self._launch_selected_many)
@@ -124,6 +161,10 @@ class MainWindow(QMainWindow):
         self.btn_set_master_client.clicked.connect(self._set_master_from_client_selection)
         self.btn_toggle_sync.clicked.connect(self._toggle_sync)
         self.btn_refresh_clients.clicked.connect(self._rebuild_clients)
+        self.btn_save_settings.clicked.connect(self._save_profile_settings)
+        self.chk_server_enabled.stateChanged.connect(self._toggle_hub)
+        self.chk_proxy_enabled.stateChanged.connect(self._on_proxy_checked)
+        self.list_clients.itemChanged.connect(self._on_client_toggled)
 
         # кэши
         self._cache_profiles: dict[str, tuple[bool, bool]] = {}
@@ -157,6 +198,15 @@ class MainWindow(QMainWindow):
         it = self.list_profiles.currentItem()
         return None if it is None else it.data(32)
 
+    def _current_profile_info(self) -> ProfileInfo | None:
+        name = self._selected_profile()
+        if not name:
+            return None
+        try:
+            return self.pm.get(name)
+        except KeyError:
+            return None
+
     def _refresh_filesystem(self):
         self.pm.refresh_filesystem()
         self.pm.attach_running_pids()
@@ -183,6 +233,102 @@ class MainWindow(QMainWindow):
                 it.setSelected(True)
 
         self._cache_profiles = new_state
+        self._update_profile_settings_panel()
+
+    def _update_profile_settings_panel(self):
+        info = self._current_profile_info()
+        enabled = info is not None
+        self.input_start_url.setEnabled(enabled)
+        self.chk_proxy_enabled.setEnabled(enabled)
+        self.input_proxy_host.setEnabled(enabled and self.chk_proxy_enabled.isChecked())
+        self.input_proxy_port.setEnabled(enabled and self.chk_proxy_enabled.isChecked())
+        self.btn_save_settings.setEnabled(enabled)
+        if not enabled:
+            self.input_start_url.clear()
+            self.chk_proxy_enabled.setChecked(False)
+            self.input_proxy_host.clear()
+            self.input_proxy_port.clear()
+            return
+
+        settings = info.settings
+        self.input_start_url.setText(settings.start_url)
+        block = self.chk_proxy_enabled.blockSignals(True)
+        self.chk_proxy_enabled.setChecked(settings.proxy_enabled)
+        self.chk_proxy_enabled.blockSignals(block)
+        self.input_proxy_host.setText(settings.proxy_host)
+        self.input_proxy_port.setText(str(settings.proxy_port or ""))
+        self.input_proxy_host.setEnabled(settings.proxy_enabled)
+        self.input_proxy_port.setEnabled(settings.proxy_enabled)
+
+    def _on_profile_selection_changed(self, *_):
+        self._update_profile_settings_panel()
+
+    def _on_proxy_checked(self, *_):
+        enabled = self.chk_proxy_enabled.isChecked()
+        self.input_proxy_host.setEnabled(enabled)
+        self.input_proxy_port.setEnabled(enabled)
+
+    def _save_profile_settings(self):
+        info = self._current_profile_info()
+        if not info:
+            QMessageBox.information(self, "Настройки", "Выберите профиль")
+            return
+        settings = ProfileSettings(
+            start_url=self.input_start_url.text().strip(),
+            proxy_enabled=self.chk_proxy_enabled.isChecked(),
+            proxy_host=self.input_proxy_host.text().strip(),
+        )
+        if settings.proxy_enabled and not settings.proxy_host:
+            QMessageBox.warning(self, "Ошибка", "Укажите адрес прокси сервера")
+            return
+        port_text = self.input_proxy_port.text().strip()
+        if port_text:
+            try:
+                settings.proxy_port = max(1, min(65535, int(port_text)))
+            except ValueError:
+                QMessageBox.warning(self, "Ошибка", "Некорректный порт прокси")
+                return
+        self.pm.update_settings(info.name, settings)
+        self.statusBar().showMessage("Настройки профиля сохранены", 4000)
+        self._update_profile_settings_panel()
+
+    # ---------- управление хабом ----------
+    def _on_tab_changed(self, idx: int):
+        if self.tabs.tabText(idx) == "Синхронизация" and self.chk_server_enabled.isChecked():
+            self._ensure_hub_running()
+
+    def _toggle_hub(self, state: int):
+        if state == Qt.Checked:
+            self._ensure_hub_running()
+        else:
+            self._stop_hub()
+
+    def _ensure_hub_running(self):
+        if self._hub_running:
+            return
+        self.hub.start_background()
+        self._hub_running = True
+        block = self.chk_server_enabled.blockSignals(True)
+        self.chk_server_enabled.setChecked(True)
+        self.chk_server_enabled.blockSignals(block)
+        self.lbl_server_status.setText("Сервер запущен")
+        self.statusBar().showMessage("WS сервер запущен", 4000)
+        self._rebuild_clients()
+
+    def _stop_hub(self):
+        if not self._hub_running:
+            return
+        self.sync.disable()
+        self._sync_enabled = False
+        self.btn_toggle_sync.setText("Включить синхронизацию")
+        self.hub.stop_background()
+        self._hub_running = False
+        self.lbl_server_status.setText("Сервер выключен")
+        self.list_clients.clear()
+        block = self.chk_server_enabled.blockSignals(True)
+        self.chk_server_enabled.setChecked(False)
+        self.chk_server_enabled.blockSignals(block)
+        self.statusBar().showMessage("WS сервер остановлен", 4000)
 
     # ---------- действия с профилями ----------
     def _create_profile(self):
@@ -292,6 +438,9 @@ class MainWindow(QMainWindow):
         self.sync.forward_keyboard = self.chk_keyboard.isChecked()
         self.sync.forward_mouse = self.chk_mouse.isChecked()
 
+        if not self._hub_running:
+            QMessageBox.warning(self, "Синхронизация", "Включите синхронизатор, чтобы использовать WS клиенты")
+        
         if not self._sync_enabled:
             self.sync.enable()
             self._sync_enabled = True
@@ -312,10 +461,14 @@ class MainWindow(QMainWindow):
         if self._tick_i % 6 == 0:
             pids = [p.pid for p in self.pm.list() if p.pid]
             self._winmap = self.wm.refresh([pid for pid in pids if pid])
-        if self._tick_i % 8 == 0:
+        if self._hub_running and self._tick_i % 8 == 0:
             self._rebuild_clients()
 
     def _rebuild_clients(self):
+        if not self._hub_running:
+            self.list_clients.clear()
+            return
+        self._updating_client_list = True
         self.list_clients.clear()
         st = self.hub.list_clients()
         master = self.hub.current_master()
@@ -323,14 +476,29 @@ class MainWindow(QMainWindow):
         for prof, meta in st.items():
             if prof == master:
                 master_present = True
-            it = QListWidgetItem(f"{'[MASTER] ' if prof==master else ''}{prof}  —  {meta['since']}")
-            it.setData(32, prof)  # имя клиента (совпадает с именем профиля в расширении)
+            text = f"{'[MASTER] ' if prof==master else ''}{prof}  —  {meta['since']}"
+            it = QListWidgetItem(text)
+            it.setData(32, prof)
+            it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+            it.setCheckState(Qt.Checked if meta.get("enabled", True) else Qt.Unchecked)
             self.list_clients.addItem(it)
         if master and not master_present:
             self.statusBar().showMessage(
                 f"Мастер '{master}' отсутствует среди клиентов WS. Проверьте имя профиля в Options расширения.",
                 8000
             )
+        self._updating_client_list = False
+
+    def _on_client_toggled(self, item: QListWidgetItem):
+        if self._updating_client_list:
+            return
+        name = item.data(32)
+        if not name:
+            return
+        enabled = item.checkState() == Qt.Checked
+        self.hub.set_client_enabled(name, enabled)
+        status = "включен" if enabled else "отключен"
+        self.statusBar().showMessage(f"Клиент '{name}' {status}", 4000)
 
     def _master_hwnd(self) -> int | None:
         if not self._master_profile: return None
@@ -346,5 +514,5 @@ class MainWindow(QMainWindow):
         return list(self._winmap.values()) if self._winmap else []
 
     def closeEvent(self, e):
-        # здесь можно добавить корректное выключение хаба при необходимости
+        self._stop_hub()
         super().closeEvent(e)
