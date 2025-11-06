@@ -1,6 +1,7 @@
 from __future__ import annotations
 import logging
 import threading
+import time
 import win32api
 import win32con
 import win32gui
@@ -27,6 +28,9 @@ class SyncManager:
         # опции
         self.forward_mouse = True
         self.forward_keyboard = True
+        self.forward_mouse_move = True
+        self._mouse_move_interval = 0.02  # сек, чтобы не забивать очередь сообщений
+        self._last_mouse_move_ts = 0.0
 
     def set_master_provider(self, fn: Callable[[], int | None]) -> None:
         self._master_hwnd_provider = fn
@@ -73,8 +77,14 @@ class SyncManager:
         master = self._master_hwnd_provider() if self._master_hwnd_provider else None
         hwnds: list[int] = []
         for w in self._get_targets():
-            if w.hwnd and w.hwnd != master:
-                hwnds.append(w.hwnd)
+            hwnd = getattr(w, "hwnd", None)
+            if not hwnd or hwnd == master:
+                continue
+            try:
+                if win32gui.IsWindow(hwnd) and win32gui.IsWindowEnabled(hwnd):
+                    hwnds.append(hwnd)
+            except Exception:
+                continue
         return hwnds
 
     # ---------- mouse hook ----------
@@ -123,7 +133,20 @@ class SyncManager:
                     except Exception as e:
                         log.debug("mouse send failed %s", e)
                 return
-        # движение мыши не транслируем
+        # ДВИЖЕНИЕ МЫШИ: полезно для наведения и drag&drop
+        if et == "move" and self.forward_mouse_move:
+            now = time.perf_counter()
+            if now - self._last_mouse_move_ts < self._mouse_move_interval:
+                return
+            self._last_mouse_move_ts = now
+            for hwnd in self._targets_hwnds():
+                try:
+                    cx, cy = win32gui.ScreenToClient(hwnd, (ex, ey))
+                    lparam = win32api.MAKELONG(cx & 0xFFFF, cy & 0xFFFF)
+                    win32gui.PostMessage(hwnd, win32con.WM_MOUSEMOVE, 0, lparam)
+                except Exception as e:
+                    log.debug("mouse move send failed %s", e)
+
 
     # ---------- keyboard hook ----------
     def _on_key(self, event):
