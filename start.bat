@@ -1,5 +1,14 @@
 @echo off
-cd /d "G:\work\Chrome-profiles-manager"
+:: Проверка на запуск от администратора
+net session >nul 2>&1
+if %errorlevel% NEQ 0 (
+    echo Запуск с правами администратора...
+    powershell -Command "Start-Process '%~f0' -Verb RunAs"
+    exit /b
+)
+
+:: Переход в директорию скрипта
+cd /d "%~dp0"
 
 echo Checking virtual environment...
 
@@ -17,5 +26,6 @@ call venv\Scripts\activate.bat
 
 echo.
 echo Starting Chrome Profiles Manager...
-python src\main.py
+python "%~dp0src\main.py"
+
 pause
