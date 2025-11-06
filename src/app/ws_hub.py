@@ -10,7 +10,9 @@ from typing import Dict, Optional
 
 log = logging.getLogger("hub")
 
-IDLE_TIMEOUT = 120  # секунды без активности до удаления клиента
+PING_INTERVAL = 25  # интервал ping/pong на уровне websockets
+PING_TIMEOUT = 50   # увеличенный таймаут для терпимости к задержкам
+IDLE_TIMEOUT = 300  # секунды без активности до удаления клиента
 
 class Client:
     def __init__(self, ws: WebSocketServerProtocol, name: str, ua: str):
@@ -78,8 +80,8 @@ class WSHub:
             handler,
             self._host,
             self._port,
-            ping_interval=20,
-            ping_timeout=20,
+            ping_interval=PING_INTERVAL,
+            ping_timeout=PING_TIMEOUT,
             max_queue=64,
         )
         log.info("[HUB] listening on ws://%s:%s", self._host, self._port)

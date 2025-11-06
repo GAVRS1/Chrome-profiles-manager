@@ -2,7 +2,8 @@ from __future__ import annotations
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QListWidget, QListWidgetItem, QMessageBox, QLineEdit, QLabel,
-    QCheckBox, QGroupBox, QAbstractItemView, QTabWidget, QFormLayout
+    QCheckBox, QGroupBox, QAbstractItemView, QTabWidget, QFormLayout,
+    QSpinBox
 )
 from PySide6.QtCore import QTimer, QThread, Signal, QObject, Qt
 from PySide6.QtGui import QIntValidator
@@ -84,10 +85,21 @@ class MainWindow(QMainWindow):
         self.btn_stop_sel = QPushButton("Остановить выбранные")
         self.btn_create = QPushButton("Создать")
         self.input_name = QLineEdit(); self.input_name.setPlaceholderText("Имя профиля")
+        self.input_count = QSpinBox()
+        self.input_count.setRange(1, 999)
+        self.input_count.setValue(1)
+        self.input_count.setToolTip("Количество профилей для создания")
+        self.input_count.setMaximumWidth(80)
+        label_count = QLabel("×")
+        label_count.setAlignment(Qt.AlignCenter)
+        self._label_count = label_count
+
         row1.addWidget(self.btn_refresh)
         row1.addWidget(self.btn_launch_sel)
         row1.addWidget(self.btn_stop_sel)
         row1.addWidget(self.input_name)
+        row1.addWidget(label_count)
+        row1.addWidget(self.input_count)
         row1.addWidget(self.btn_create)
         tab_profiles_layout.addLayout(row1)
 
@@ -335,13 +347,36 @@ class MainWindow(QMainWindow):
         name = self.input_name.text().strip()
         if not name:
             QMessageBox.warning(self, "Ошибка", "Укажите имя профиля"); return
-        try:
-            self.pm.create(name)
-            self.input_name.clear()
-            self._rebuild_list(force=True)
-            self.statusBar().showMessage(f"Профиль '{name}' создан", 4000)
-        except FileExistsError:
-            QMessageBox.warning(self, "Ошибка", f"Профиль '{name}' уже существует")
+
+        count = max(1, int(self.input_count.value()))
+        created: list[str] = []
+        skipped: list[str] = []
+
+        for idx in range(count):
+            candidate = name if count == 1 else f"{name}{idx + 1}"
+            try:
+                self.pm.create(candidate)
+                created.append(candidate)
+            except FileExistsError:
+                skipped.append(candidate)
+
+        self._rebuild_list(force=True)
+        if created:
+            if len(created) <= 5:
+                msg = "Созданы профили: " + ", ".join(created)
+            else:
+                sample = ", ".join(created[:5])
+                msg = f"Создано профилей: {len(created)} (пример: {sample} …)"
+            self.statusBar().showMessage(msg, 6000)
+        if skipped:
+            QMessageBox.warning(
+                self,
+                "Внимание",
+                "Не удалось создать: " + ", ".join(skipped) + " — уже существуют"
+            )
+
+        self.input_name.clear()
+        self.input_count.setValue(1)
 
     def _launch_selected_many(self):
         names = self._selected_profile_names()
