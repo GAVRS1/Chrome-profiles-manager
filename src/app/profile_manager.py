@@ -6,7 +6,6 @@ import subprocess
 import shutil
 import psutil
 import time
-import json
 from typing import Optional, List, Dict, Set
 from .config import PROFILES_ROOT, CANDIDATE_CHROME_PATHS, CHROME_ARGS_BASE, EXTENSION_PATH
 from .profile_settings import ProfileSettings
@@ -65,7 +64,6 @@ class ProfileManager:
         settings = ProfileSettings()
         settings.save(path)
         info = ProfileInfo(name=name, path=path, settings=settings)
-        self._prepare_profile_extension(info)
         self._profiles.append(info)
         return info
 
@@ -131,11 +129,8 @@ class ProfileManager:
             f"--user-data-dir={str(info.path)}",
             *CHROME_ARGS_BASE,
         ]
-        extension_dir = self._prepare_profile_extension(info)
-        if not extension_dir and EXTENSION_PATH and EXTENSION_PATH.exists():
-            extension_dir = EXTENSION_PATH
-        if extension_dir:
-            args.append(f"--load-extension={str(extension_dir)}")
+        if EXTENSION_PATH and EXTENSION_PATH.exists():
+            args.append(f"--load-extension={str(EXTENSION_PATH)}")
         proxy = info.settings.proxy_server
         if proxy:
             args.append(f"--proxy-server={proxy}")
@@ -153,27 +148,6 @@ class ProfileManager:
         info.settings = settings
         settings.save(info.path)
         return settings
-
-    def _prepare_profile_extension(self, info: ProfileInfo) -> Path | None:
-        if not EXTENSION_PATH or not EXTENSION_PATH.exists() or not EXTENSION_PATH.is_dir():
-            return None
-        target = info.path / "extension"
-        try:
-            shutil.copytree(EXTENSION_PATH, target, dirs_exist_ok=True)
-        except Exception:
-            return None
-        cfg_path = target / "profile_config.json"
-        try:
-            payload = {
-                "profile": info.name,
-            }
-            cfg_path.write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-        except Exception:
-            pass
-        return target
 
     def stop_fast(self, name: str, soft_ms: int = 600, term_ms: int = 900) -> None:
         info = self.get(name)

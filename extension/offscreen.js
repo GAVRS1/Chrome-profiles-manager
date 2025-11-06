@@ -1,33 +1,10 @@
 let ws = null;
-const DEFAULT_WS_URL = "ws://127.0.0.1:8765";
-
-function randomProfileName(){
-  return "prof_" + Math.random().toString(36).slice(2, 8);
-}
-
-let wsURL = DEFAULT_WS_URL;
-let profile = randomProfileName();
+let wsURL = "ws://127.0.0.1:8765";
+let profile = "prof_"+Math.random().toString(36).slice(2,8);
 let ready = false;
 let retry = 1000;
 
-async function applyLocalDefaults(){
-  try {
-    const resp = await fetch(chrome.runtime.getURL("profile_config.json"));
-    if (!resp.ok) return;
-    const data = await resp.json();
-    if (typeof data.wsURL === "string" && data.wsURL.trim()) {
-      wsURL = data.wsURL.trim();
-    }
-    if (typeof data.profile === "string" && data.profile.trim()) {
-      profile = data.profile.trim();
-    }
-  } catch (e) {
-    // ignore
-  }
-}
-
 async function loadCfg() {
-  await applyLocalDefaults();
   const s = await chrome.storage.local.get(["wsURL","profile"]);
   wsURL = s.wsURL || wsURL;
   profile = s.profile || profile;
