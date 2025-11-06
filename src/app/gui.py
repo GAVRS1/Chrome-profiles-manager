@@ -300,8 +300,32 @@ class MainWindow(QMainWindow):
             except ValueError:
                 QMessageBox.warning(self, "Ошибка", "Некорректный порт прокси")
                 return
-        self.pm.update_settings(info.name, settings)
-        self.statusBar().showMessage("Настройки профиля сохранены", 4000)
+
+        targets = self._selected_profile_names()
+        if not targets:
+            targets = [info.name]
+        elif info.name not in targets:
+            targets.insert(0, info.name)
+
+        payload = dict(
+            start_url=settings.start_url,
+            proxy_enabled=settings.proxy_enabled,
+            proxy_host=settings.proxy_host,
+            proxy_port=settings.proxy_port,
+        )
+
+        saved = []
+        for name in targets:
+            clone = ProfileSettings(**payload)
+            self.pm.update_settings(name, clone)
+            saved.append(name)
+
+        if len(saved) == 1:
+            self.statusBar().showMessage("Настройки профиля сохранены", 4000)
+        else:
+            self.statusBar().showMessage(
+                f"Настройки сохранены для {len(saved)} профилей", 4000
+            )
         self._update_profile_settings_panel()
 
     # ---------- управление хабом ----------

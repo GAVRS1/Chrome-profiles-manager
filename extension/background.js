@@ -1,10 +1,37 @@
-let cfg = { wsURL: "ws://127.0.0.1:8765", profile: "prof_"+Math.random().toString(36).slice(2,8) };
+const DEFAULT_WS_URL = "ws://127.0.0.1:8765";
+
+function randomProfileName(){
+  return "prof_" + Math.random().toString(36).slice(2, 8);
+}
+
+let cfg = { wsURL: DEFAULT_WS_URL, profile: randomProfileName() };
+
+async function readProfileDefaults(){
+  try {
+    const resp = await fetch(chrome.runtime.getURL("profile_config.json"));
+    if (!resp.ok) return {};
+    const data = await resp.json();
+    const result = {};
+    if (typeof data.wsURL === "string" && data.wsURL.trim()) {
+      result.wsURL = data.wsURL.trim();
+    }
+    if (typeof data.profile === "string" && data.profile.trim()) {
+      result.profile = data.profile.trim();
+    }
+    return result;
+  } catch (e) {
+    return {};
+  }
+}
 
 // вкладка, которую мы «ведём» в этом профиле
 let controlledTabId = null;
 
 // грузим конфиг из storage
 async function loadCfg() {
+  const defaults = await readProfileDefaults();
+  if (defaults.wsURL) cfg.wsURL = defaults.wsURL;
+  if (defaults.profile) cfg.profile = defaults.profile;
   const s = await chrome.storage.local.get(["wsURL","profile"]);
   cfg.wsURL = s.wsURL || cfg.wsURL;
   cfg.profile = s.profile || cfg.profile;
