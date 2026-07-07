@@ -6,7 +6,8 @@ from PySide6.QtWidgets import (
     QSpinBox
 )
 from PySide6.QtCore import QTimer, QThread, Signal, QObject, Qt
-from PySide6.QtGui import QIntValidator
+from PySide6.QtGui import QIntValidator, QColor
+from .theme import GREEN, RED, ACCENT, TEXT_DIM
 from .profile_manager import ProfileManager, ProfileInfo
 from .profile_settings import ProfileSettings
 from .chrome_window_manager import ChromeWindowManager, WindowInfo
@@ -49,7 +50,9 @@ class StopManyWorker(QObject):
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Chrome Profiles Synchronizer")
+        self.setWindowTitle("Chrome Profiles Manager")
+        self.resize(860, 640)
+        self.setMinimumSize(680, 480)
         self.pm = ProfileManager()
         self.wm = ChromeWindowManager()
         self._master_profile: str | None = None
@@ -73,17 +76,36 @@ class MainWindow(QMainWindow):
         # ---- вкладка профилей ----
         tab_profiles = QWidget()
         tab_profiles_layout = QVBoxLayout(tab_profiles)
+        tab_profiles_layout.setContentsMargins(12, 12, 12, 12)
+        tab_profiles_layout.setSpacing(10)
 
-        tab_profiles_layout.addWidget(QLabel("Профили"))
+        lbl_profiles = QLabel("Профили")
+        lbl_profiles.setProperty("sectionTitle", True)
+        tab_profiles_layout.addWidget(lbl_profiles)
         self.list_profiles = QListWidget()
         self.list_profiles.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        tab_profiles_layout.addWidget(self.list_profiles)
+        tab_profiles_layout.addWidget(self.list_profiles, stretch=1)
 
-        row1 = QHBoxLayout()
-        self.btn_refresh = QPushButton("Обновить")
-        self.btn_launch_sel = QPushButton("Запустить выбранные")
-        self.btn_stop_sel = QPushButton("Остановить выбранные")
-        self.btn_create = QPushButton("Создать")
+        # действия с выбранными профилями
+        row_actions = QHBoxLayout()
+        row_actions.setSpacing(8)
+        self.btn_refresh = QPushButton("⟳ Обновить")
+        self.btn_launch_sel = QPushButton("▶ Запустить")
+        self.btn_launch_sel.setProperty("accent", True)
+        self.btn_stop_sel = QPushButton("■ Остановить")
+        self.btn_delete_sel = QPushButton("🗑 Удалить")
+        self.btn_delete_sel.setProperty("danger", True)
+        row_actions.addWidget(self.btn_refresh)
+        row_actions.addStretch(1)
+        row_actions.addWidget(self.btn_launch_sel)
+        row_actions.addWidget(self.btn_stop_sel)
+        row_actions.addWidget(self.btn_delete_sel)
+        tab_profiles_layout.addLayout(row_actions)
+
+        # создание профилей
+        row_create = QHBoxLayout()
+        row_create.setSpacing(8)
+        self.btn_create = QPushButton("+ Создать")
         self.input_name = QLineEdit(); self.input_name.setPlaceholderText("Имя профиля")
         self.input_count = QSpinBox()
         self.input_count.setRange(1, 999)
@@ -94,14 +116,11 @@ class MainWindow(QMainWindow):
         label_count.setAlignment(Qt.AlignCenter)
         self._label_count = label_count
 
-        row1.addWidget(self.btn_refresh)
-        row1.addWidget(self.btn_launch_sel)
-        row1.addWidget(self.btn_stop_sel)
-        row1.addWidget(self.input_name)
-        row1.addWidget(label_count)
-        row1.addWidget(self.input_count)
-        row1.addWidget(self.btn_create)
-        tab_profiles_layout.addLayout(row1)
+        row_create.addWidget(self.input_name, stretch=1)
+        row_create.addWidget(label_count)
+        row_create.addWidget(self.input_count)
+        row_create.addWidget(self.btn_create)
+        tab_profiles_layout.addLayout(row_create)
 
         settings_group = QGroupBox("Настройки профиля")
         settings_form = QFormLayout(settings_group)
@@ -130,11 +149,17 @@ class MainWindow(QMainWindow):
         # ---- вкладка синхронизации ----
         tab_sync = QWidget()
         tab_sync_layout = QVBoxLayout(tab_sync)
+        tab_sync_layout.setContentsMargins(12, 12, 12, 12)
+        tab_sync_layout.setSpacing(10)
 
+        server_row = QHBoxLayout()
         self.chk_server_enabled = QCheckBox("Включить синхронизатор (WS сервер)")
-        self.lbl_server_status = QLabel("Сервер выключен")
-        tab_sync_layout.addWidget(self.chk_server_enabled)
-        tab_sync_layout.addWidget(self.lbl_server_status)
+        self.lbl_server_status = QLabel("● Сервер выключен")
+        self.lbl_server_status.setStyleSheet(f"color: {TEXT_DIM};")
+        server_row.addWidget(self.chk_server_enabled)
+        server_row.addStretch(1)
+        server_row.addWidget(self.lbl_server_status)
+        tab_sync_layout.addLayout(server_row)
 
         gb = QGroupBox("Синхронизация ввода (нативная, WinAPI)")
         gbl = QHBoxLayout(gb)
@@ -148,7 +173,9 @@ class MainWindow(QMainWindow):
         gbl.addWidget(self.btn_toggle_sync)
         tab_sync_layout.addWidget(gb)
 
-        tab_sync_layout.addWidget(QLabel("WS-клиенты (расширение)"))
+        lbl_clients = QLabel("WS-клиенты (расширение)")
+        lbl_clients.setProperty("sectionTitle", True)
+        tab_sync_layout.addWidget(lbl_clients)
         self.list_clients = QListWidget()
         self.list_clients.setSelectionMode(QAbstractItemView.ExtendedSelection)
         tab_sync_layout.addWidget(self.list_clients)
@@ -169,13 +196,16 @@ class MainWindow(QMainWindow):
         self.btn_create.clicked.connect(self._create_profile)
         self.btn_launch_sel.clicked.connect(self._launch_selected_many)
         self.btn_stop_sel.clicked.connect(self._stop_selected_many_async)
+        self.btn_delete_sel.clicked.connect(self._delete_selected)
         self.btn_set_master_profile.clicked.connect(self._set_master_from_profile_selection)
         self.btn_set_master_client.clicked.connect(self._set_master_from_client_selection)
         self.btn_toggle_sync.clicked.connect(self._toggle_sync)
         self.btn_refresh_clients.clicked.connect(self._rebuild_clients)
         self.btn_save_settings.clicked.connect(self._save_profile_settings)
-        self.chk_server_enabled.stateChanged.connect(self._toggle_hub)
-        self.chk_proxy_enabled.stateChanged.connect(self._on_proxy_checked)
+        # toggled(bool) вместо stateChanged(int): в PySide6 сравнение int с
+        # enum Qt.Checked всегда ложно, из-за чего сервер не запускался
+        self.chk_server_enabled.toggled.connect(self._toggle_hub)
+        self.chk_proxy_enabled.toggled.connect(self._on_proxy_checked)
         self.list_clients.itemChanged.connect(self._on_client_toggled)
 
         # кэши
@@ -238,8 +268,18 @@ class MainWindow(QMainWindow):
 
         self.list_profiles.clear()
         for p in self.pm.list():
-            text = f"{'[MASTER] ' if self._master_profile==p.name else ''}{p.name}  —  {'RUNNING' if p.pid else 'STOPPED'}"
-            it = QListWidgetItem(text); it.setData(32, p.name)
+            is_master = self._master_profile == p.name
+            running = bool(p.pid)
+            status = "● запущен" if running else "○ остановлен"
+            prefix = "★ " if is_master else ""
+            it = QListWidgetItem(f"{prefix}{p.name}   {status}")
+            it.setData(32, p.name)
+            if is_master:
+                it.setForeground(QColor(ACCENT))
+            elif running:
+                it.setForeground(QColor(GREEN))
+            else:
+                it.setForeground(QColor(TEXT_DIM))
             self.list_profiles.addItem(it)
             if p.name in selected:
                 it.setSelected(True)
@@ -309,8 +349,8 @@ class MainWindow(QMainWindow):
         if self.tabs.tabText(idx) == "Синхронизация" and self.chk_server_enabled.isChecked():
             self._ensure_hub_running()
 
-    def _toggle_hub(self, state: int):
-        if state == Qt.Checked:
+    def _toggle_hub(self, checked: bool):
+        if checked:
             self._ensure_hub_running()
         else:
             self._stop_hub()
@@ -323,7 +363,8 @@ class MainWindow(QMainWindow):
         block = self.chk_server_enabled.blockSignals(True)
         self.chk_server_enabled.setChecked(True)
         self.chk_server_enabled.blockSignals(block)
-        self.lbl_server_status.setText("Сервер запущен")
+        self.lbl_server_status.setText("● Сервер запущен  ws://127.0.0.1:8765")
+        self.lbl_server_status.setStyleSheet(f"color: {GREEN};")
         self.statusBar().showMessage("WS сервер запущен", 4000)
         self._rebuild_clients()
 
@@ -335,7 +376,8 @@ class MainWindow(QMainWindow):
         self.btn_toggle_sync.setText("Включить синхронизацию")
         self.hub.stop_background()
         self._hub_running = False
-        self.lbl_server_status.setText("Сервер выключен")
+        self.lbl_server_status.setText("● Сервер выключен")
+        self.lbl_server_status.setStyleSheet(f"color: {TEXT_DIM};")
         self.list_clients.clear()
         block = self.chk_server_enabled.blockSignals(True)
         self.chk_server_enabled.setChecked(False)
@@ -434,6 +476,46 @@ class MainWindow(QMainWindow):
         if names:
             self.statusBar().showMessage(f"Остановлены: {', '.join(names)}", 6000)
 
+    def _delete_selected(self):
+        names = self._selected_profile_names()
+        if not names:
+            one = self._selected_profile()
+            if one: names = [one]
+        if not names:
+            QMessageBox.information(self, "Удаление", "Выберите один или несколько профилей")
+            return
+
+        running = [n for n in names if self.pm.get(n).pid]
+        if running:
+            QMessageBox.warning(
+                self, "Удаление",
+                "Сначала остановите профили: " + ", ".join(running)
+            )
+            return
+
+        answer = QMessageBox.question(
+            self, "Удаление профилей",
+            f"Удалить профили ({len(names)}): {', '.join(names)}?\n"
+            "Папки профилей будут удалены безвозвратно.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        if answer != QMessageBox.Yes:
+            return
+
+        deleted = []
+        for n in names:
+            try:
+                self.pm.delete(n)
+                deleted.append(n)
+            except Exception as e:
+                self.statusBar().showMessage(f"Не удалось удалить '{n}': {e}", 6000)
+        if self._master_profile in deleted:
+            self._master_profile = None
+            self.hub.set_master(None)
+        self._rebuild_list(force=True)
+        if deleted:
+            self.statusBar().showMessage(f"Удалены: {', '.join(deleted)}", 6000)
+
     # ---------- мастер по профилю ----------
     def _set_master_from_profile_selection(self):
         # берём первый из выбранных профилей
@@ -511,9 +593,10 @@ class MainWindow(QMainWindow):
         for prof, meta in st.items():
             if prof == master:
                 master_present = True
-            text = f"{'[MASTER] ' if prof==master else ''}{prof}  —  {meta['since']}"
-            it = QListWidgetItem(text)
+            prefix = "★ " if prof == master else ""
+            it = QListWidgetItem(f"{prefix}{prof}   активность {meta['since']} назад")
             it.setData(32, prof)
+            it.setForeground(QColor(ACCENT) if prof == master else QColor(GREEN))
             it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
             it.setCheckState(Qt.Checked if meta.get("enabled", True) else Qt.Unchecked)
             self.list_clients.addItem(it)

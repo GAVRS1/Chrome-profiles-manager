@@ -75,24 +75,31 @@ class ProfileManager:
         self.refresh_filesystem()
 
     # ---------- процессы ----------
+    @staticmethod
+    def _user_data_dir(cmdline: List[str] | None) -> Optional[str]:
+        """Достаёт значение --user-data-dir из аргументов процесса."""
+        for arg in cmdline or []:
+            if arg.startswith("--user-data-dir="):
+                return arg.split("=", 1)[1].strip('"')
+        return None
+
     def _pids_for_profile(self, prof: ProfileInfo) -> Set[int]:
+        """Все PID профиля: корневые процессы Chrome с его --user-data-dir и их дети."""
         pids: Set[int] = set()
         prof_path = str(prof.path)
 
-    # 1) процессы с путём профиля
         roots: Set[int] = set()
-        for p in psutil.process_iter(attrs=["pid","name","cmdline"]):
+        for p in psutil.process_iter(attrs=["pid", "name", "cmdline"]):
             try:
                 if "chrome" not in (p.info["name"] or "").lower():
                     continue
-                cmd = " ".join(p.info.get("cmdline") or [])
-                if prof_path in cmd:
+                # точное сравнение: подстрока ловила чужой профиль (a ⊂ a1)
+                if self._user_data_dir(p.info.get("cmdline")) == prof_path:
                     roots.add(p.info["pid"])
             except Exception:
                 continue
 
-    # 2) добавим корни и всех детей
-        for pid in list(roots):
+        for pid in roots:
             try:
                 proc = psutil.Process(pid)
                 pids.add(pid)
@@ -107,15 +114,25 @@ class ProfileManager:
         for i in self._profiles:
             i.pid = None
         found: Dict[str, int | None] = {p.name: None for p in self._profiles}
+        if not self._profiles:
+            return found
+        # один проход по процессам, поиск по хеш-таблице путей, ранний выход
+        by_path: Dict[str, ProfileInfo] = {str(p.path): p for p in self._profiles}
+        remaining = len(by_path)
         for p in psutil.process_iter(attrs=["pid", "name", "cmdline"]):
+            if remaining == 0:
+                break
             try:
                 if "chrome" not in (p.info["name"] or "").lower():
                     continue
-                cmd = " ".join(p.info.get("cmdline") or [])
-                for prof in self._profiles:
-                    if str(prof.path) in cmd and found[prof.name] is None:
-                        found[prof.name] = p.info["pid"]
-                        prof.pid = p.info["pid"]
+                udd = self._user_data_dir(p.info.get("cmdline"))
+                if not udd:
+                    continue
+                prof = by_path.get(udd)
+                if prof is not None and found[prof.name] is None:
+                    found[prof.name] = p.info["pid"]
+                    prof.pid = p.info["pid"]
+                    remaining -= 1
             except Exception:
                 continue
         return found

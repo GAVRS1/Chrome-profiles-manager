@@ -2,6 +2,7 @@ import sys
 import ctypes
 from PySide6.QtWidgets import QApplication
 from app.gui import MainWindow
+from app.theme import APP_STYLE
 
 def _require_admin():
     try:
@@ -15,6 +16,8 @@ def _require_admin():
 if __name__ == "__main__":
     _require_admin()
     app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    app.setStyleSheet(APP_STYLE)
     win = MainWindow()
     win.show()
     sys.exit(app.exec())
